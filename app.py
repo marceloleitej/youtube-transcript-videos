@@ -6,6 +6,7 @@ import whisper
 import tempfile
 import os
 import sys
+import torch
 
 def baixar_audio_e_transcrever(url, lang_code):
     try:
@@ -15,7 +16,6 @@ def baixar_audio_e_transcrever(url, lang_code):
         if os.path.exists(temp_file_audio):
             os.remove(temp_file_audio)
 
-        # Use o python -m yt_dlp para garantir que pegue o yt-dlp correto do venv
         subprocess.run([
             sys.executable, "-m", "yt_dlp",
             "-f", "bestaudio[ext=m4a]/bestaudio",
@@ -24,7 +24,8 @@ def baixar_audio_e_transcrever(url, lang_code):
             url
         ], check=True)
 
-        model = whisper.load_model("small")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = whisper.load_model("medium", device=device)
         result = model.transcribe(temp_file_audio, language=lang_code)
         texto = result["text"]
 
