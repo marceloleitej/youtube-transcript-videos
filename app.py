@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import scrolledtext
+from tkinter import filedialog
 import subprocess
 import whisper
 import tempfile
@@ -36,11 +37,25 @@ def baixar_audio_e_transcrever(url, lang_code):
     except Exception as e:
         return f"Erro ao processar: {e}"
 
+def transcrever_video_local(file_path, lang_code):
+    try:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = whisper.load_model("medium", device=device)
+        result = model.transcribe(file_path, language=lang_code)
+        return result["text"].strip()
+    except Exception as e:
+        return f"Erro ao processar: {e}"
+
 def gerar_transcricao():
-    url = entrada_url.get().strip()
+    caminho = entrada_url.get().strip()
     idioma_selecionado = idioma_var.get()
     lang_code = "en" if idioma_selecionado == "English" else "pt"
-    texto = baixar_audio_e_transcrever(url, lang_code)
+
+    if caminho.startswith("http"):
+        texto = baixar_audio_e_transcrever(caminho, lang_code)
+    else:
+        texto = transcrever_video_local(caminho, lang_code)
+
     caixa_texto.config(state="normal")
     caixa_texto.delete("1.0", tk.END)
     caixa_texto.insert(tk.END, texto)
@@ -51,16 +66,27 @@ def copiar_texto():
     janela.clipboard_clear()
     janela.clipboard_append(texto)
 
+def buscar_arquivo():
+    file_path = filedialog.askopenfilename(
+        filetypes=[("Video/Audio Files", "*.mp4 *.mkv *.mov *.avi *.wav *.m4a"), ("All Files", "*.*")]
+    )
+    if file_path:
+        entrada_url.delete(0, tk.END)
+        entrada_url.insert(0, file_path)
+
 janela = tk.Tk()
-janela.title("Transcritor de Vídeo do YouTube")
+janela.title("Transcritor de Vídeo/Áudio")
 
 frame_principal = ttk.Frame(janela, padding="10")
 frame_principal.grid(row=0, column=0, sticky="NSEW")
 
-label_url = ttk.Label(frame_principal, text="Cole a URL do YouTube:")
+label_url = ttk.Label(frame_principal, text="URL do YouTube ou Caminho do Arquivo:")
 label_url.grid(row=0, column=0, padx=5, pady=5, sticky="W")
 entrada_url = ttk.Entry(frame_principal, width=50)
 entrada_url.grid(row=1, column=0, padx=5, pady=5, sticky="W")
+
+botao_buscar = ttk.Button(frame_principal, text="Procurar Arquivo", command=buscar_arquivo)
+botao_buscar.grid(row=1, column=1, padx=5, pady=5, sticky="W")
 
 idioma_var = tk.StringVar()
 idioma_var.set("English")
