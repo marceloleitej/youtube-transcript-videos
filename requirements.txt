@@ -1,0 +1,8 @@
+PySide6>=6.6.0
+yt-dlp[default]>=2026.2.0
+yt-dlp-ejs>=0.8.0
+httpx>=0.27.0
+python-dotenv>=1.0.0
+# Native music player engine (ffmpeg subprocess + PortAudio callback)
+sounddevice>=0.5.0
+numpy>=1.24
