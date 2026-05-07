@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt, QRunnable, QThread, QThreadPool, Signal, Slot
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
@@ -507,6 +508,16 @@ class MainWindow(QMainWindow):
         self._current_media_path = ""
 
         self.setWindowTitle("Super Video Downloader")
+        # Setting the icon on QApplication isn't always inherited by the
+        # QMainWindow on Windows (taskbar grouping uses AppUserModelID, which
+        # app.py already sets). Set it on the window explicitly so it shows
+        # in the title bar, taskbar, and Alt+Tab.
+        icon_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "icon.ico",
+        )
+        if os.path.isfile(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         self.setMinimumSize(960, 700)
         self.resize(1050, 780)
 

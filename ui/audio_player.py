@@ -338,6 +338,15 @@ class AudioPlayer(QWidget):
             return
 
         idx = max(0, min(start_index, len(self._queue) - 1))
+        # Only honor a saved last_position_ms here, on initial entry into a
+        # track. play_next / play_previous / auto-advance / double-click on
+        # the queue must always start at 0 — that's why this fallback lives
+        # in load_queue and not in _load_at.
+        if start_position_ms <= 0:
+            path = self._queue[idx]
+            data = self._queue_meta.get(path)
+            if data and getattr(data, "last_position_ms", 0) > 0:
+                start_position_ms = int(data.last_position_ms)
         self._pending_start_ms = max(0, int(start_position_ms or 0))
         self._load_at(idx)
 
@@ -431,10 +440,6 @@ class AudioPlayer(QWidget):
             self.thumb_label.setPixmap(pix)
         else:
             self.thumb_label.setPixmap(icons.music_note("#3a3b66").pixmap(56, 56))
-
-        # Resume position (either explicit pending or from data)
-        if self._pending_start_ms <= 0 and data and data.last_position_ms > 0:
-            self._pending_start_ms = int(data.last_position_ms)
 
         self.player.setSource(path)
         self.player.setPlaybackRate(self.speed_combo.currentData())
