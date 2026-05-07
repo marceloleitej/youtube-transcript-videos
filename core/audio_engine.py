@@ -191,6 +191,11 @@ class AudioEngine(QObject):
         self._base_ms = 0
         self._duration_ms = 0
         self._end_emitted = False
+        # Pipeline was just destroyed — state must reflect that, otherwise a
+        # subsequent play() short-circuits via `if _state == PlayingState`
+        # and never restarts the pipeline for the new source.
+        self._set_state(State.StoppedState)
+        self._pos_timer.stop()
 
         if not self._source:
             self._set_status(MediaStatus.NoMedia)
