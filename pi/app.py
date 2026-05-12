@@ -81,10 +81,11 @@ class DownloadRequest(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
+    # Starlette >=1.0 requires Request as the first positional arg.
     return templates.TemplateResponse(
+        request,
         "index.html",
         {
-            "request": request,
             "languages": LANGUAGES,
             "default_language": DEFAULT_LANGUAGE,
             "deepgram_configured": bool(DEEPGRAM_API_KEY),
