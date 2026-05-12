@@ -1,0 +1,23 @@
+# Pasted into build context root (repo root). Keep image lean.
+.venv/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+.git/
+.idea/
+.vscode/
+output/
+.env
+**/.env
+*.log
+check_log.txt*
+pip_log.txt*
+nul
+# PC-only — Qt UI not needed in the Pi image
+ui/
+app.py
+start.bat
+teste_gpu.py
+_check_env.py
+icon.*
+TUTORIAL.md

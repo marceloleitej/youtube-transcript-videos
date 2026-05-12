@@ -185,15 +185,15 @@ class _ThumbFetchWorker(QThread):
 
     thumb_ready = Signal(str, str)
 
-    def __init__(self, output_dir: str, jobs: list[tuple[str, str]], parent=None):
-        # jobs: list of (video_id, thumbnail_url)
+    def __init__(self, jobs: list[tuple[str, str, str]], parent=None):
+        # jobs: list of (output_dir, video_id, thumbnail_url) — each video
+        # can come from a different media source folder.
         super().__init__(parent)
-        self._output_dir = output_dir
         self._jobs = list(jobs)
 
     def run(self):
-        for vid, url in self._jobs:
-            p = ensure_thumbnail(self._output_dir, vid, url)
+        for output_dir, vid, url in self._jobs:
+            p = ensure_thumbnail(output_dir, vid, url)
             if p:
                 self.thumb_ready.emit(vid, p)
 
@@ -449,9 +449,13 @@ class VideoHistoryPanel(QWidget):
     video_rename = Signal(str, str)            # media_path, new_title
     video_folder_change = Signal(list, str)    # list[media_path], new_folder
 
-    def __init__(self, output_dir: str, parent=None):
+    def __init__(self, output_dirs, parent=None):
+        """``output_dirs`` accepts str (legacy) or list[str] of media folders."""
         super().__init__(parent)
-        self._output_dir = output_dir
+        if isinstance(output_dirs, str):
+            self._output_dirs: list[str] = [output_dirs]
+        else:
+            self._output_dirs = list(output_dirs or [])
         self._videos: list[dict] = []
         self._items: list[VideoHistoryItem] = []
         self._headers: list[FolderHeaderWidget] = []
@@ -573,11 +577,25 @@ class VideoHistoryPanel(QWidget):
         return result
 
     def set_output_dir(self, path: str) -> None:
-        self._output_dir = path
+        """Legacy single-folder setter — preserved for backwards-compat."""
+        self._output_dirs = [path] if path else []
+
+    def set_output_dirs(self, paths: list[str]) -> None:
+        """Replace the full list of media source folders and refresh."""
+        self._output_dirs = list(paths or [])
+
+    @property
+    def output_dirs(self) -> list[str]:
+        return list(self._output_dirs)
+
+    @property
+    def primary_output_dir(self) -> str:
+        """The folder where new downloads on this machine should land."""
+        return self._output_dirs[0] if self._output_dirs else ""
 
     def refresh(self) -> None:
         """Reload video list from disk and rebuild UI."""
-        self._videos = VideoStore.list_videos(self._output_dir)
+        self._videos = VideoStore.list_videos(self._output_dirs)
         raw_folders = [v["folder"] for v in self._videos if v.get("folder")]
         # Include implicit ancestor folders (e.g. "Games/RE" implies "Games")
         self._known_folders = expand_ancestors(raw_folders)
@@ -686,20 +704,37 @@ class VideoHistoryPanel(QWidget):
             self.breadcrumb.setVisible(False)
 
     def _kick_thumb_fetch(self, videos: list[dict]) -> None:
-        """Spawn a worker to download any missing thumbs for the visible items."""
-        missing = [
-            (v.get("video_id", ""), v.get("thumbnail_url", ""))
-            for v in videos
-            if v.get("video_id") and v.get("thumbnail_url")
-            and not has_thumb(self._output_dir, v["video_id"])
-        ]
+        """Spawn a worker to download any missing thumbs for the visible items.
+
+        Each video may live in a different output_dir (Pi-synced folder vs
+        local), so we look up the cache path per-video.
+        """
+        missing = []
+        for v in videos:
+            vid = v.get("video_id", "")
+            url = v.get("thumbnail_url", "")
+            out = self._video_dir(v)
+            if not (vid and url and out):
+                continue
+            if has_thumb(out, vid):
+                continue
+            missing.append((out, vid, url))
         if not missing:
             return
         if self._thumb_worker and self._thumb_worker.isRunning():
             return  # let the current batch finish; next refresh will pick up the rest
-        self._thumb_worker = _ThumbFetchWorker(self._output_dir, missing, self)
+        self._thumb_worker = _ThumbFetchWorker(missing, self)
         self._thumb_worker.thumb_ready.connect(self._on_thumb_ready)
         self._thumb_worker.start()
+
+    @staticmethod
+    def _video_dir(info: dict) -> str:
+        """Return the folder a video lives in — prefer the stamp from list_videos."""
+        out = info.get("output_dir")
+        if out:
+            return out
+        path = info.get("media_path", "")
+        return os.path.dirname(path) if path else ""
 
     @Slot(str, str)
     def _on_thumb_ready(self, video_id: str, local_path: str) -> None:
@@ -772,7 +807,8 @@ class VideoHistoryPanel(QWidget):
     def _insert_item(self, info: dict) -> VideoHistoryItem:
         """Create a VideoHistoryItem, connect signals, and insert into layout."""
         vid = info.get("video_id", "")
-        tp = thumb_path(self._output_dir, vid) if vid else None
+        out = self._video_dir(info)
+        tp = thumb_path(out, vid) if (vid and out) else None
         local_thumb = tp if (tp and os.path.isfile(tp)) else None
         item = VideoHistoryItem(info, folders=self._known_folders,
                                 thumb_local_path=local_thumb)

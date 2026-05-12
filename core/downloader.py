@@ -31,21 +31,28 @@ class VideoDownloader:
     """Download videos/audio from YouTube, TikTok, Instagram via yt-dlp."""
 
     def __init__(self, progress_callback: Optional[Callable[[float, str], None]] = None,
-                 cookies_file: str = ""):
+                 cookies_file: str = "",
+                 extra_opts: Optional[dict] = None):
         self.progress_callback = progress_callback
         self.cookies_file = cookies_file
+        # Extra yt-dlp opts merged into every call. Used by the Pi service
+        # to force windowsfilenames=True so files synced via Syncthing land
+        # on a Windows host without illegal chars (:, ?, *, etc).
+        self.extra_opts = extra_opts or {}
         self._cancelled = False
 
     def cancel(self):
         self._cancelled = True
 
     def _apply_common_opts(self, opts: dict) -> None:
-        """Add cookies and JS runtime config to yt-dlp opts."""
+        """Add cookies, JS runtime config, and caller-supplied opts."""
         if self.cookies_file and os.path.isfile(self.cookies_file):
             opts["cookiefile"] = self.cookies_file
         js = _find_node()
         if js:
             opts["js_runtimes"] = js
+        if self.extra_opts:
+            opts.update(self.extra_opts)
 
     def get_info(self, url: str) -> dict:
         """Return metadata: title, duration, thumbnail URL."""

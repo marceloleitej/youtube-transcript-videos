@@ -7,17 +7,25 @@ import uuid
 from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt, QRunnable, QThread, QThreadPool, Signal, Slot
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
     QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from core import media_sources
 from core.downloader import VideoDownloader
 from core.platform_detect import detect_platform
 from core.store import VideoData, VideoStore
@@ -379,6 +387,97 @@ QToolTip {
 """
 
 
+class MediaSourcesDialog(QDialog):
+    """Manage the list of extra media folders the history scans.
+
+    The bundled ``output/`` folder is always the first source and isn't
+    user-editable — it's where new downloads on this machine land. Users
+    add/remove extra folders (e.g. ``D:\\Syncthing\\videos-app`` for the
+    Pi-synced folder).
+    """
+
+    def __init__(self, repo_root: str, current: list[str], parent=None):
+        super().__init__(parent)
+        self._repo_root = repo_root
+        self._primary = media_sources.primary(repo_root)
+        self.setWindowTitle("Pastas de midia")
+        self.setMinimumSize(560, 360)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        info = QLabel(
+            "Pastas que o app varre para listar videos. A pasta primaria "
+            "(<code>output/</code> dentro do app) e sempre incluida — adicione "
+            "aqui, por exemplo, a pasta sincronizada do Pi via Syncthing."
+        )
+        info.setWordWrap(True)
+        info.setTextFormat(Qt.RichText)
+        layout.addWidget(info)
+
+        self.list_widget = QListWidget()
+        layout.addWidget(self.list_widget, 1)
+
+        for p in current:
+            self._add_item(p, primary=(os.path.normcase(p) == os.path.normcase(self._primary)))
+
+        btn_row = QHBoxLayout()
+        self.add_btn = QPushButton("Adicionar pasta...")
+        self.rm_btn = QPushButton("Remover selecionada")
+        self.add_btn.clicked.connect(self._pick_folder)
+        self.rm_btn.clicked.connect(self._remove_selected)
+        btn_row.addWidget(self.add_btn)
+        btn_row.addWidget(self.rm_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        layout.addWidget(bb)
+
+    def _add_item(self, path: str, primary: bool = False) -> None:
+        label = path + ("   (primaria — nao pode ser removida)" if primary else "")
+        item = QListWidgetItem(label)
+        item.setData(Qt.UserRole, path)
+        item.setData(Qt.UserRole + 1, primary)
+        if primary:
+            item.setForeground(Qt.gray)
+        self.list_widget.addItem(item)
+
+    def _pick_folder(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Selecionar pasta de midia")
+        if not path:
+            return
+        norm = os.path.normpath(path)
+        for i in range(self.list_widget.count()):
+            existing = self.list_widget.item(i).data(Qt.UserRole)
+            if os.path.normcase(existing) == os.path.normcase(norm):
+                QMessageBox.information(self, "Ja adicionada", "Essa pasta ja esta na lista.")
+                return
+        self._add_item(norm)
+
+    def _remove_selected(self) -> None:
+        item = self.list_widget.currentItem()
+        if not item:
+            return
+        if item.data(Qt.UserRole + 1):  # primary flag
+            QMessageBox.warning(self, "Bloqueado", "A pasta primaria nao pode ser removida.")
+            return
+        self.list_widget.takeItem(self.list_widget.row(item))
+
+    def extra_paths(self) -> list[str]:
+        """Return the user-edited extras (excluding the primary)."""
+        out: list[str] = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.data(Qt.UserRole + 1):  # skip primary
+                continue
+            out.append(item.data(Qt.UserRole))
+        return out
+
+
 class DownloadWorker(QThread):
     """Background worker for download + optional transcription."""
 
@@ -532,8 +631,10 @@ class MainWindow(QMainWindow):
         splitter.setHandleWidth(6)
 
         # --- LEFT: History panel ---
-        output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "output")
-        self.history_panel = VideoHistoryPanel(output_dir)
+        # Multiple media folders (primary local + extras like Pi/Syncthing).
+        self._repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self._media_dirs = media_sources.load(self._repo_root)
+        self.history_panel = VideoHistoryPanel(self._media_dirs)
         self.history_panel.setMinimumWidth(280)
         self.history_panel.setMaximumWidth(400)
         splitter.addWidget(self.history_panel)
@@ -588,6 +689,8 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(splitter)
 
+        self._build_menu()
+
         # --- Connect signals ---
         self.download_panel.download_requested.connect(self._on_download_requested)
         self.download_panel.update_ytdlp_requested.connect(self._on_update_ytdlp)
@@ -607,6 +710,56 @@ class MainWindow(QMainWindow):
         self.transcript_viewer.transcribe_requested.connect(self._on_transcribe_current)
         self.transcript_viewer.ai_summary_requested.connect(self._on_ai_summary)
         self.local_transcribe.transcribe_requested.connect(self._on_local_transcribe)
+
+    # -- Menu --
+
+    def _build_menu(self) -> None:
+        bar = self.menuBar()
+        file_menu = bar.addMenu("&Arquivo")
+
+        sources_act = QAction("Pastas de midia...", self)
+        sources_act.triggered.connect(self._open_media_sources_dialog)
+        file_menu.addAction(sources_act)
+
+        open_primary_act = QAction("Abrir pasta primaria", self)
+        open_primary_act.triggered.connect(self._open_primary_folder)
+        file_menu.addAction(open_primary_act)
+
+        file_menu.addSeparator()
+
+        refresh_act = QAction("Atualizar historico", self)
+        refresh_act.setShortcut("F5")
+        refresh_act.triggered.connect(self._refresh_history)
+        file_menu.addAction(refresh_act)
+
+    @Slot()
+    def _open_media_sources_dialog(self) -> None:
+        dlg = MediaSourcesDialog(self._repo_root, self._media_dirs, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        media_sources.save(self._repo_root, dlg.extra_paths())
+        self._media_dirs = media_sources.load(self._repo_root)
+        self.history_panel.set_output_dirs(self._media_dirs)
+        # Pick up any new sidecars in the newly-added folders
+        VideoStore.migrate_existing_media(self._media_dirs)
+        self.history_panel.refresh()
+
+    @Slot()
+    def _open_primary_folder(self) -> None:
+        path = media_sources.primary(self._repo_root)
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)  # noqa: S606
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "Erro", f"Nao consegui abrir a pasta: {e}")
+
+    @Slot()
+    def _refresh_history(self) -> None:
+        self.history_panel.refresh()
 
     # -- Download flow --
 

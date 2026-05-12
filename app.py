@@ -31,6 +31,7 @@ from dotenv import load_dotenv
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from core import media_sources
 from core.store import VideoStore
 from ui.main_window import MainWindow, DARK_STYLE
 
@@ -38,12 +39,13 @@ load_dotenv()
 
 
 def main():
-    # Ensure output directory exists
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-    os.makedirs(output_dir, exist_ok=True)
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    # Primary local folder must exist before scans / downloads.
+    media_sources.primary(repo_root)
 
-    # Migrate existing media files that don't have JSON sidecars yet
-    VideoStore.migrate_existing_media(output_dir)
+    # Migrate JSON sidecars across all configured media folders (local +
+    # any Syncthing-mirrored folders from the Pi service).
+    VideoStore.migrate_existing_media(media_sources.load(repo_root))
 
     api_key = os.getenv("DEEPGRAM_API_KEY", "")
 

@@ -7,7 +7,27 @@ import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
+
+
+def _normalize_dirs(value: "Union[str, list[str]]") -> list[str]:
+    """Accept either a single path or a list — return a clean list of existing dirs."""
+    if isinstance(value, str):
+        candidates = [value]
+    else:
+        candidates = list(value or [])
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in candidates:
+        if not p:
+            continue
+        norm = os.path.normpath(p)
+        key = os.path.normcase(norm)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(norm)
+    return out
 
 from core.platform_detect import UNKNOWN, detect_platform
 
@@ -101,37 +121,47 @@ class VideoStore:
             return None
 
     @staticmethod
-    def list_videos(output_dir: str) -> list[dict]:
+    def list_videos(output_dirs: "Union[str, list[str]]") -> list[dict]:
         """Return a lightweight list of videos for populating the sidebar.
 
-        Each dict contains: media_path, title, platform, format, created_at,
-        duration_seconds, has_transcription.
+        Accepts a single path (legacy) or a list of paths. When multiple
+        dirs are passed, results are merged and de-duplicated by media_path.
+        Each dict carries ``output_dir`` so callers can locate the per-folder
+        thumbnail cache without re-deriving from media_path.
         """
-        results = []
-        if not os.path.isdir(output_dir):
-            return results
+        dirs = _normalize_dirs(output_dirs)
+        results: list[dict] = []
+        seen: set[str] = set()
 
-        for fname in os.listdir(output_dir):
-            ext = os.path.splitext(fname)[1].lower()
-            if ext not in (".mp4", ".mp3"):
+        for output_dir in dirs:
+            if not os.path.isdir(output_dir):
                 continue
-            media_path = os.path.join(output_dir, fname)
-            data = VideoStore.load(media_path)
-            if data is None:
-                continue
-            results.append({
-                "media_path": media_path,
-                "title": data.title or fname,
-                "platform": data.platform,
-                "format": ext.lstrip("."),
-                "created_at": data.created_at,
-                "duration_seconds": data.duration_seconds,
-                "has_transcription": bool(data.transcription),
-                "folder": data.folder,
-                "video_id": data.video_id,
-                "thumbnail_url": data.thumbnail_url,
-                "last_position_ms": data.last_position_ms,
-            })
+            for fname in os.listdir(output_dir):
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in (".mp4", ".mp3"):
+                    continue
+                media_path = os.path.join(output_dir, fname)
+                key = os.path.normcase(os.path.normpath(media_path))
+                if key in seen:
+                    continue
+                data = VideoStore.load(media_path)
+                if data is None:
+                    continue
+                seen.add(key)
+                results.append({
+                    "media_path": media_path,
+                    "title": data.title or fname,
+                    "platform": data.platform,
+                    "format": ext.lstrip("."),
+                    "created_at": data.created_at,
+                    "duration_seconds": data.duration_seconds,
+                    "has_transcription": bool(data.transcription),
+                    "folder": data.folder,
+                    "video_id": data.video_id,
+                    "thumbnail_url": data.thumbnail_url,
+                    "last_position_ms": data.last_position_ms,
+                    "output_dir": output_dir,
+                })
 
         # Sort by created_at descending (newest first)
         results.sort(key=lambda v: v["created_at"], reverse=True)
@@ -186,23 +216,28 @@ class VideoStore:
             VideoStore.save(media_path, data)
 
     @staticmethod
-    def list_bookmark_categories(output_dir: str) -> list[str]:
-        """Collect unique non-empty bookmark categories across all videos."""
+    def list_bookmark_categories(output_dirs: "Union[str, list[str]]") -> list[str]:
+        """Collect unique non-empty bookmark categories across all videos.
+
+        Accepts a single path (legacy) or a list of paths.
+        """
+        dirs = _normalize_dirs(output_dirs)
         categories: set[str] = set()
-        if not os.path.isdir(output_dir):
-            return []
-        for fname in os.listdir(output_dir):
-            ext = os.path.splitext(fname)[1].lower()
-            if ext not in (".mp4", ".mp3"):
+        for output_dir in dirs:
+            if not os.path.isdir(output_dir):
                 continue
-            media_path = os.path.join(output_dir, fname)
-            data = VideoStore.load(media_path)
-            if data is None:
-                continue
-            for bk in data.bookmarks or []:
-                cat = (bk.get("category") or "").strip()
-                if cat:
-                    categories.add(cat)
+            for fname in os.listdir(output_dir):
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in (".mp4", ".mp3"):
+                    continue
+                media_path = os.path.join(output_dir, fname)
+                data = VideoStore.load(media_path)
+                if data is None:
+                    continue
+                for bk in data.bookmarks or []:
+                    cat = (bk.get("category") or "").strip()
+                    if cat:
+                        categories.add(cat)
         return sorted(categories)
 
     @staticmethod
@@ -307,37 +342,41 @@ class VideoStore:
                     pass
 
     @staticmethod
-    def migrate_existing_media(output_dir: str) -> int:
+    def migrate_existing_media(output_dirs: "Union[str, list[str]]") -> int:
         """Create JSON sidecars for media files that don't have one yet.
 
-        Returns the number of files migrated.
+        Accepts a single path (legacy) or a list of paths.
+        Returns the total number of files migrated across all dirs.
         """
-        if not os.path.isdir(output_dir):
-            return 0
-
+        dirs = _normalize_dirs(output_dirs)
         count = 0
-        for fname in os.listdir(output_dir):
-            ext = os.path.splitext(fname)[1].lower()
-            if ext not in (".mp4", ".mp3"):
+        for output_dir in dirs:
+            if not os.path.isdir(output_dir):
                 continue
-            media_path = os.path.join(output_dir, fname)
-            if _resolve_json_path(media_path):
-                continue
+            for fname in os.listdir(output_dir):
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in (".mp4", ".mp3"):
+                    continue
+                media_path = os.path.join(output_dir, fname)
+                if _resolve_json_path(media_path):
+                    continue
 
-            # Create a minimal VideoData from filesystem info
-            title = os.path.splitext(fname)[0]
-            stat = os.stat(media_path)
-            created = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+                # Create a minimal VideoData from filesystem info
+                title = os.path.splitext(fname)[0]
+                stat = os.stat(media_path)
+                created = datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).isoformat()
 
-            data = VideoData(
-                video_id=uuid.uuid4().hex[:12],
-                title=title,
-                platform=UNKNOWN,
-                media_file=fname,
-                format=ext.lstrip("."),
-                created_at=created,
-            )
-            VideoStore.save(media_path, data)
-            count += 1
+                data = VideoData(
+                    video_id=uuid.uuid4().hex[:12],
+                    title=title,
+                    platform=UNKNOWN,
+                    media_file=fname,
+                    format=ext.lstrip("."),
+                    created_at=created,
+                )
+                VideoStore.save(media_path, data)
+                count += 1
 
         return count

@@ -10,9 +10,13 @@ __pycache__/
 
 # Secrets / runtime
 .env
+pi/.env
 
 # App output (downloaded media + JSON sidecars)
 output/
+
+# Per-machine media source folder list (absolute paths)
+media_sources.json
 
 # Logs / pip artifacts / Windows redirect bug artifacts
 *.log
@@ -32,3 +36,6 @@ nul
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Claude Code cache
+.claude/

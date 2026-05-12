@@ -1,0 +1,19 @@
+services:
+  videos-pi:
+    container_name: videos-pi
+    build:
+      context: ..
+      dockerfile: pi/Dockerfile
+    image: videos-pi:latest
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+    environment:
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      DEFAULT_LANGUAGE: ${DEFAULT_LANGUAGE:-pt-BR}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-2}
+      JOB_HISTORY_LIMIT: ${JOB_HISTORY_LIMIT:-50}
+    volumes:
+      # Host path that Syncthing watches — must exist before `up`.
+      # Defaults to the SSD pool Marcelo uses for sync folders.
+      - ${OUTPUT_DIR:-/media/devmon/sda1-ata-UP_GAMER_1TB_UP2/Syncthing/videos-app}:/output
