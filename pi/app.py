@@ -84,6 +84,16 @@ class DownloadRequest(BaseModel):
         return v
 
 
+def _asset_version() -> str:
+    """Bust browser cache by appending the newest static asset mtime."""
+    static_dir = BASE_DIR / "static"
+    try:
+        mtimes = [p.stat().st_mtime for p in static_dir.iterdir() if p.is_file()]
+        return str(int(max(mtimes))) if mtimes else "0"
+    except OSError:
+        return "0"
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     # Starlette >=1.0 requires Request as the first positional arg.
@@ -95,6 +105,7 @@ def index(request: Request):
             "default_language": DEFAULT_LANGUAGE,
             "deepgram_configured": bool(DEEPGRAM_API_KEY),
             "output_dir": OUTPUT_DIR,
+            "asset_version": _asset_version(),
         },
     )
 
