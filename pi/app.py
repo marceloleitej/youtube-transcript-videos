@@ -7,6 +7,7 @@ picks them up automatically — the JSON sidecar format is identical.
 import logging
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -146,8 +147,16 @@ def list_library():
     via the StaticFiles mount.
     """
     items = VideoStore.list_videos(OUTPUT_DIR)
+    thumbs_dir = os.path.join(OUTPUT_DIR, ".thumbs")
     for v in items:
-        v["media_url"] = "/media/" + os.path.basename(v["media_path"])
+        # quote() encodes spaces, '#', emoji, etc. so the browser's <video>
+        # request reaches the StaticFiles mount intact.
+        v["media_url"] = "/media/" + quote(os.path.basename(v["media_path"]))
+        vid = v.get("video_id") or ""
+        if vid and os.path.isfile(os.path.join(thumbs_dir, f"{vid}.jpg")):
+            v["thumb_url"] = f"/media/.thumbs/{quote(vid)}.jpg"
+        else:
+            v["thumb_url"] = ""
     return {"videos": items}
 
 

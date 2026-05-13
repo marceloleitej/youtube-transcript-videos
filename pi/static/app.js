@@ -179,6 +179,7 @@ tabs.forEach((btn) => {
 const libraryEl = document.getElementById("library");
 const libraryCountEl = document.getElementById("library-count");
 const platformFilterEl = document.getElementById("platform-filter");
+const searchEl = document.getElementById("library-search");
 const playerCardEl = document.getElementById("player-card");
 const libraryCardEl = document.getElementById("library-card");
 const playerEl = document.getElementById("player");
@@ -187,8 +188,82 @@ const playerTitleEl = document.getElementById("player-title");
 const playerMetaEl = document.getElementById("player-meta");
 const playerBackBtn = document.getElementById("player-back");
 
+const NO_FOLDER = "__nofolder__";
+const COLLAPSE_KEY = "videos-pi.collapse.v1";
+
 let libraryVideos = [];
 let knownPlatforms = new Set();
+let collapsedFolders = loadCollapseState();
+
+// Platform badge labels & colors mirror the PC app (ui/history_panel.py).
+const PLATFORM_BADGES = {
+  youtube:   { label: "YT", color: "#FF0000" },
+  tiktok:    { label: "TT", color: "#00f2ea" },
+  instagram: { label: "IG", color: "#E1306C" },
+  facebook:  { label: "FB", color: "#1877F2" },
+};
+
+function badgeFor(platform) {
+  return PLATFORM_BADGES[(platform || "").toLowerCase()] || { label: "??", color: "#666" };
+}
+
+// ----- Folder hierarchy helpers (mirror core path logic) -----
+
+function folderParts(folder) {
+  if (!folder) return [];
+  return folder.split("/").map((p) => p.trim()).filter(Boolean);
+}
+
+function folderDepth(folder) {
+  return folderParts(folder).length;
+}
+
+function folderLeaf(folder) {
+  const parts = folderParts(folder);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+
+function folderBelongsTo(folder, ancestor) {
+  if (!ancestor) return true;
+  return folder === ancestor || folder.startsWith(ancestor + "/");
+}
+
+function expandAncestors(folders) {
+  const seen = new Set();
+  folders.forEach((f) => {
+    const parts = folderParts(f);
+    for (let i = 1; i <= parts.length; i++) {
+      seen.add(parts.slice(0, i).join("/"));
+    }
+  });
+  return [...seen];
+}
+
+function anyAncestorCollapsed(folder) {
+  const parts = folderParts(folder);
+  for (let i = 1; i < parts.length; i++) {
+    const ancestor = parts.slice(0, i).join("/");
+    if (collapsedFolders[ancestor]) return true;
+  }
+  return false;
+}
+
+function loadCollapseState() {
+  try {
+    const raw = localStorage.getItem(COLLAPSE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCollapseState() {
+  try {
+    localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsedFolders));
+  } catch {}
+}
+
+// ----- Library data load -----
 
 async function refreshLibrary() {
   try {
@@ -209,7 +284,6 @@ function syncPlatformOptions() {
   libraryVideos.forEach((v) => {
     if (v.platform) platforms.add(v.platform);
   });
-  // Only rebuild if the set changed (avoid losing focus/scroll).
   const same = platforms.size === knownPlatforms.size &&
     [...platforms].every((p) => knownPlatforms.has(p));
   if (same) return;
@@ -222,16 +296,25 @@ function syncPlatformOptions() {
 }
 
 platformFilterEl.addEventListener("change", renderLibrary);
+if (searchEl) {
+  searchEl.addEventListener("input", renderLibrary);
+}
+
+// ----- Rendering -----
+
+function filteredVideos() {
+  const plat = platformFilterEl.value;
+  const search = (searchEl ? searchEl.value : "").trim().toLowerCase();
+  return libraryVideos.filter((v) => {
+    if (plat && v.platform !== plat) return false;
+    if (search && !(v.title || "").toLowerCase().includes(search)) return false;
+    return true;
+  });
+}
 
 function renderLibrary() {
-  const filter = platformFilterEl.value;
-  const filtered = filter
-    ? libraryVideos.filter((v) => v.platform === filter)
-    : libraryVideos;
-
-  libraryCountEl.textContent = filtered.length
-    ? `(${filtered.length})`
-    : "";
+  const filtered = filteredVideos();
+  libraryCountEl.textContent = filtered.length ? `(${filtered.length})` : "";
 
   if (!filtered.length) {
     libraryEl.innerHTML = `<li class="empty">${
@@ -240,7 +323,114 @@ function renderLibrary() {
     return;
   }
 
-  libraryEl.innerHTML = filtered.map(libraryItemHtml).join("");
+  const search = (searchEl ? searchEl.value : "").trim();
+  // While searching: flat list (easier to scan across folders).
+  if (search) {
+    libraryEl.innerHTML = filtered.map(libraryItemHtml).join("");
+    bindLibraryItems();
+    return;
+  }
+
+  // Group by folder + render hierarchical headers.
+  const groups = {};
+  filtered.forEach((v) => {
+    const k = v.folder || "";
+    (groups[k] = groups[k] || []).push(v);
+  });
+
+  const withItems = Object.keys(groups).filter((f) => f);
+  const allFolders = new Set([...withItems, ...expandAncestors(withItems)]);
+  const sortedFolders = [...allFolders].sort((a, b) => {
+    const ap = folderParts(a), bp = folderParts(b);
+    const n = Math.min(ap.length, bp.length);
+    for (let i = 0; i < n; i++) {
+      const c = ap[i].localeCompare(bp[i], "pt", { sensitivity: "base" });
+      if (c !== 0) return c;
+    }
+    return ap.length - bp.length;
+  });
+
+  const html = [];
+
+  // "Sem pasta" group goes last only if it has items.
+  for (const folder of sortedFolders) {
+    const items = groups[folder] || [];
+    let descendantCount = items.length;
+    for (const k of Object.keys(groups)) {
+      if (k && k !== folder && k.startsWith(folder + "/")) {
+        descendantCount += groups[k].length;
+      }
+    }
+    html.push(folderHeaderHtml(folder, descendantCount));
+    // Inline items appear directly after their header.
+    for (const v of items) html.push(libraryItemHtml(v, folder));
+  }
+
+  if (groups[""]) {
+    html.push(folderHeaderHtml("", groups[""].length));
+    for (const v of groups[""]) html.push(libraryItemHtml(v, ""));
+  }
+
+  libraryEl.innerHTML = html.join("");
+  applyCollapseVisibility();
+  bindFolderHeaders();
+  bindLibraryItems();
+}
+
+function folderHeaderHtml(folder, count) {
+  const depth = folderDepth(folder);
+  const collapsed = !!collapsedFolders[folder || NO_FOLDER];
+  const label = folder ? folderLeaf(folder) : "Sem pasta";
+  const arrow = collapsed ? "&#9654;" : "&#9660;";
+  return `
+    <li class="folder-header${collapsed ? " collapsed" : ""}"
+        data-folder="${escapeAttr(folder)}"
+        data-depth="${depth}"
+        style="--depth: ${depth};">
+      <span class="folder-arrow">${arrow}</span>
+      <span class="folder-name">${escapeHtml(label)}</span>
+      <span class="folder-count">${count}</span>
+    </li>`;
+}
+
+function libraryItemHtml(v, folder = "") {
+  const title = escapeHtml(v.title || v.media_path || "(sem titulo)");
+  const fmt = (v.format || "").toLowerCase();
+  const dur = formatDuration(v.duration_seconds);
+  const date = formatDate(v.created_at);
+  const hasTr = !!v.has_transcription;
+  const badge = badgeFor(v.platform);
+  const thumbStyle = v.thumb_url
+    ? `background-image: url('${escapeAttr(v.thumb_url)}');`
+    : "";
+
+  const meta = [
+    date ? `<span>${escapeHtml(date)}</span>` : "",
+    dur ? `<span>${escapeHtml(dur)}</span>` : "",
+    `<span class="${hasTr ? "tr-ok" : "tr-no"}">${hasTr ? "&#10003; Transcrito" : "&#9675; Sem transcricao"}</span>`,
+  ].filter(Boolean).join('<span class="dot-sep">&middot;</span>');
+
+  const depth = folderDepth(folder);
+  return `
+    <li class="library-item"
+        data-play="${escapeAttr(v.video_id)}"
+        data-folder="${escapeAttr(folder)}"
+        style="--depth: ${depth};">
+      <div class="library-thumb" style="${thumbStyle}">
+        <span class="library-badge" style="background:${badge.color};">${badge.label}</span>
+        ${!thumbStyle ? `<span class="library-fmt ${fmt}">${(fmt || "?").toUpperCase()}</span>` : ""}
+      </div>
+      <div class="library-body">
+        <div class="library-title">
+          ${title}
+          <span class="fmt-pill ${fmt}">${(fmt || "").toUpperCase()}</span>
+        </div>
+        <div class="library-meta">${meta}</div>
+      </div>
+    </li>`;
+}
+
+function bindLibraryItems() {
   libraryEl.querySelectorAll("[data-play]").forEach((el) => {
     el.addEventListener("click", () => {
       const v = libraryVideos.find((x) => x.video_id === el.dataset.play);
@@ -249,24 +439,51 @@ function renderLibrary() {
   });
 }
 
-function libraryItemHtml(v) {
-  const title = escapeHtml(v.title || v.media_path || "(sem titulo)");
-  const platform = escapeHtml(v.platform || "Outro");
-  const fmt = escapeHtml(v.format || "");
-  const dur = formatDuration(v.duration_seconds);
-  return `
-    <li class="library-item" data-play="${escapeAttr(v.video_id)}">
-      <div class="library-thumb">
-        <span class="library-fmt ${fmt}">${fmt.toUpperCase() || "?"}</span>
-      </div>
-      <div class="library-body">
-        <div class="library-title">${title}</div>
-        <div class="library-meta">
-          <span class="pill">${platform}</span>
-          ${dur ? `<span>${dur}</span>` : ""}
-        </div>
-      </div>
-    </li>`;
+function bindFolderHeaders() {
+  libraryEl.querySelectorAll(".folder-header").forEach((el) => {
+    el.addEventListener("click", () => {
+      const folder = el.dataset.folder || "";
+      const key = folder || NO_FOLDER;
+      const nowCollapsed = !collapsedFolders[key];
+      if (nowCollapsed) collapsedFolders[key] = true;
+      else delete collapsedFolders[key];
+      saveCollapseState();
+      applyCollapseVisibility();
+    });
+  });
+}
+
+function applyCollapseVisibility() {
+  const headers = libraryEl.querySelectorAll(".folder-header");
+  const items = libraryEl.querySelectorAll(".library-item");
+
+  headers.forEach((el) => {
+    const folder = el.dataset.folder || "";
+    const key = folder || NO_FOLDER;
+    const collapsed = !!collapsedFolders[key];
+    el.classList.toggle("collapsed", collapsed);
+    el.querySelector(".folder-arrow").innerHTML = collapsed ? "&#9654;" : "&#9660;";
+    // Hide the header itself when any ancestor is collapsed.
+    const hidden = folder ? anyAncestorCollapsed(folder) : false;
+    el.style.display = hidden ? "none" : "";
+  });
+
+  items.forEach((el) => {
+    const folder = el.dataset.folder || "";
+    const key = folder || NO_FOLDER;
+    const ownCollapsed = !!collapsedFolders[key];
+    const ancestorCollapsed = folder ? anyAncestorCollapsed(folder) : false;
+    el.style.display = (ownCollapsed || ancestorCollapsed) ? "none" : "";
+  });
+}
+
+function formatDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${d.getFullYear()}`;
 }
 
 function play(v) {
