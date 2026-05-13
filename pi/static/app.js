@@ -141,3 +141,184 @@ function escapeHtml(s) {
 
 refreshJobs();
 setInterval(refreshJobs, 1500);
+
+// ---------- Tabs --------------------------------------------------------
+
+const tabs = document.querySelectorAll(".tab");
+const panels = {
+  download: document.getElementById("tab-download"),
+  library: document.getElementById("tab-library"),
+};
+let activeTab = "download";
+
+tabs.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const target = btn.dataset.tab;
+    if (target === activeTab) return;
+    activeTab = target;
+    tabs.forEach((b) => {
+      const on = b.dataset.tab === target;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    Object.entries(panels).forEach(([k, el]) => {
+      const on = k === target;
+      el.classList.toggle("active", on);
+      el.hidden = !on;
+    });
+    if (target === "library") {
+      refreshLibrary();
+    } else {
+      stopPlayback();
+    }
+  });
+});
+
+// ---------- Library -----------------------------------------------------
+
+const libraryEl = document.getElementById("library");
+const libraryCountEl = document.getElementById("library-count");
+const platformFilterEl = document.getElementById("platform-filter");
+const playerCardEl = document.getElementById("player-card");
+const libraryCardEl = document.getElementById("library-card");
+const playerEl = document.getElementById("player");
+const playerAudioEl = document.getElementById("player-audio");
+const playerTitleEl = document.getElementById("player-title");
+const playerMetaEl = document.getElementById("player-meta");
+const playerBackBtn = document.getElementById("player-back");
+
+let libraryVideos = [];
+let knownPlatforms = new Set();
+
+async function refreshLibrary() {
+  try {
+    const resp = await fetch("/api/library");
+    const data = await resp.json();
+    libraryVideos = data.videos || [];
+  } catch {
+    libraryEl.innerHTML = '<li class="empty">Falha ao carregar a biblioteca.</li>';
+    return;
+  }
+  syncPlatformOptions();
+  renderLibrary();
+}
+
+function syncPlatformOptions() {
+  const current = platformFilterEl.value;
+  const platforms = new Set();
+  libraryVideos.forEach((v) => {
+    if (v.platform) platforms.add(v.platform);
+  });
+  // Only rebuild if the set changed (avoid losing focus/scroll).
+  const same = platforms.size === knownPlatforms.size &&
+    [...platforms].every((p) => knownPlatforms.has(p));
+  if (same) return;
+  knownPlatforms = platforms;
+  const sorted = [...platforms].sort((a, b) => a.localeCompare(b));
+  platformFilterEl.innerHTML =
+    '<option value="">Todas</option>' +
+    sorted.map((p) => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`).join("");
+  if (sorted.includes(current)) platformFilterEl.value = current;
+}
+
+platformFilterEl.addEventListener("change", renderLibrary);
+
+function renderLibrary() {
+  const filter = platformFilterEl.value;
+  const filtered = filter
+    ? libraryVideos.filter((v) => v.platform === filter)
+    : libraryVideos;
+
+  libraryCountEl.textContent = filtered.length
+    ? `(${filtered.length})`
+    : "";
+
+  if (!filtered.length) {
+    libraryEl.innerHTML = `<li class="empty">${
+      libraryVideos.length ? "Nenhum video com esse filtro." : "Nenhum video baixado ainda."
+    }</li>`;
+    return;
+  }
+
+  libraryEl.innerHTML = filtered.map(libraryItemHtml).join("");
+  libraryEl.querySelectorAll("[data-play]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const v = libraryVideos.find((x) => x.video_id === el.dataset.play);
+      if (v) play(v);
+    });
+  });
+}
+
+function libraryItemHtml(v) {
+  const title = escapeHtml(v.title || v.media_path || "(sem titulo)");
+  const platform = escapeHtml(v.platform || "Outro");
+  const fmt = escapeHtml(v.format || "");
+  const dur = formatDuration(v.duration_seconds);
+  return `
+    <li class="library-item" data-play="${escapeAttr(v.video_id)}">
+      <div class="library-thumb">
+        <span class="library-fmt ${fmt}">${fmt.toUpperCase() || "?"}</span>
+      </div>
+      <div class="library-body">
+        <div class="library-title">${title}</div>
+        <div class="library-meta">
+          <span class="pill">${platform}</span>
+          ${dur ? `<span>${dur}</span>` : ""}
+        </div>
+      </div>
+    </li>`;
+}
+
+function play(v) {
+  const isAudio = (v.format || "").toLowerCase() === "mp3";
+  stopPlayback();
+  playerTitleEl.textContent = v.title || v.media_path;
+  playerMetaEl.textContent = [
+    v.platform || "",
+    formatDuration(v.duration_seconds),
+  ].filter(Boolean).join(" · ");
+
+  if (isAudio) {
+    playerEl.hidden = true;
+    playerAudioEl.hidden = false;
+    playerAudioEl.src = v.media_url;
+    playerAudioEl.play().catch(() => {});
+  } else {
+    playerAudioEl.hidden = true;
+    playerEl.hidden = false;
+    playerEl.src = v.media_url;
+    playerEl.play().catch(() => {});
+  }
+  playerCardEl.hidden = false;
+  libraryCardEl.hidden = true;
+  playerCardEl.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function stopPlayback() {
+  try { playerEl.pause(); } catch {}
+  try { playerAudioEl.pause(); } catch {}
+  playerEl.removeAttribute("src");
+  playerAudioEl.removeAttribute("src");
+  playerEl.load && playerEl.load();
+  playerAudioEl.load && playerAudioEl.load();
+}
+
+playerBackBtn.addEventListener("click", () => {
+  stopPlayback();
+  playerCardEl.hidden = true;
+  libraryCardEl.hidden = false;
+});
+
+function formatDuration(seconds) {
+  const s = Math.max(0, Math.floor(Number(seconds) || 0));
+  if (!s) return "";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+
+function escapeAttr(s) {
+  return escapeHtml(s);
+}

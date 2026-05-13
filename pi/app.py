@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
+from core.store import VideoStore
 from pi.jobs import JobManager
 
 load_dotenv()
@@ -47,6 +48,10 @@ BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI(title="Videos Pi", version="0.1")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+# Serve downloaded media files. Starlette's StaticFiles handles HTTP Range
+# requests natively, so the HTML5 <video> tag can seek without extra code.
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+app.mount("/media", StaticFiles(directory=OUTPUT_DIR), name="media")
 
 job_manager = JobManager(
     output_dir=OUTPUT_DIR,
@@ -120,6 +125,19 @@ def create_download(req: DownloadRequest):
 @app.get("/api/jobs")
 def list_jobs():
     return {"jobs": job_manager.list()}
+
+
+@app.get("/api/library")
+def list_library():
+    """List every video that lives in OUTPUT_DIR (the Syncthing-watched folder).
+
+    Each entry includes a ``media_url`` rooted at /media/ so the UI can stream
+    via the StaticFiles mount.
+    """
+    items = VideoStore.list_videos(OUTPUT_DIR)
+    for v in items:
+        v["media_url"] = "/media/" + os.path.basename(v["media_path"])
+    return {"videos": items}
 
 
 @app.get("/api/jobs/{job_id}")

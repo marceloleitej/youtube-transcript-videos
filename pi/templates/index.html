@@ -19,54 +19,86 @@
     </div>
   </header>
 
+  <nav class="tabs" role="tablist">
+    <button class="tab active" role="tab" data-tab="download" aria-selected="true">Download</button>
+    <button class="tab" role="tab" data-tab="library" aria-selected="false">Biblioteca</button>
+  </nav>
+
   <main>
-    <section class="card">
-      <h2>Nova tarefa</h2>
-      <form id="dl-form" autocomplete="off">
-        <label for="url">URL do video</label>
-        <input id="url" name="url" type="url" required
-               placeholder="https://youtube.com/..."
-               inputmode="url" autocapitalize="off" spellcheck="false">
+    <div id="tab-download" class="tab-panel active">
+      <section class="card">
+        <h2>Nova tarefa</h2>
+        <form id="dl-form" autocomplete="off">
+          <label for="url">URL do video</label>
+          <input id="url" name="url" type="url" required
+                 placeholder="https://youtube.com/..."
+                 inputmode="url" autocapitalize="off" spellcheck="false">
 
-        <div class="row">
-          <fieldset class="format">
-            <legend>Formato</legend>
-            <label><input type="radio" name="format" value="mp4" checked> Video (mp4)</label>
-            <label><input type="radio" name="format" value="mp3"> Audio (mp3)</label>
-          </fieldset>
+          <div class="row">
+            <fieldset class="format">
+              <legend>Formato</legend>
+              <label><input type="radio" name="format" value="mp4" checked> Video (mp4)</label>
+              <label><input type="radio" name="format" value="mp3"> Audio (mp3)</label>
+            </fieldset>
 
-          <fieldset class="transcribe">
-            <legend>Transcricao</legend>
-            <label class="toggle">
-              <input type="checkbox" id="transcribe" name="transcribe"
-                     {% if not deepgram_configured %}disabled{% endif %}>
-              <span>Transcrever depois de baixar</span>
-            </label>
-            <label for="language" class="lang-label">Idioma</label>
-            <select id="language" name="language"
-                    {% if not deepgram_configured %}disabled{% endif %}>
-              {% for code, label in languages %}
-                <option value="{{ code }}"
-                  {% if code == default_language %}selected{% endif %}>{{ label }}</option>
-              {% endfor %}
+            <fieldset class="transcribe">
+              <legend>Transcricao</legend>
+              <label class="toggle">
+                <input type="checkbox" id="transcribe" name="transcribe"
+                       {% if not deepgram_configured %}disabled{% endif %}>
+                <span>Transcrever depois de baixar</span>
+              </label>
+              <label for="language" class="lang-label">Idioma</label>
+              <select id="language" name="language"
+                      {% if not deepgram_configured %}disabled{% endif %}>
+                {% for code, label in languages %}
+                  <option value="{{ code }}"
+                    {% if code == default_language %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </fieldset>
+          </div>
+
+          <button type="submit" id="submit-btn">Adicionar a fila</button>
+          <p class="hint">
+            Saida vai para <code>{{ output_dir }}</code> (sincronizada com o PC via Syncthing).
+          </p>
+          <p id="form-error" class="error" hidden></p>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Tarefas <span id="jobs-count" class="muted"></span></h2>
+        <ul id="jobs" class="jobs">
+          <li class="empty">Nenhuma tarefa ainda.</li>
+        </ul>
+      </section>
+    </div>
+
+    <div id="tab-library" class="tab-panel" hidden>
+      <section class="card" id="player-card" hidden>
+        <button type="button" id="player-back" class="link-btn">&larr; Voltar a lista</button>
+        <h2 id="player-title" class="player-title">Reproduzindo</h2>
+        <video id="player" controls preload="metadata" playsinline></video>
+        <audio id="player-audio" controls preload="metadata" hidden></audio>
+        <p id="player-meta" class="muted player-meta"></p>
+      </section>
+
+      <section class="card" id="library-card">
+        <div class="library-header">
+          <h2>Biblioteca <span id="library-count" class="muted"></span></h2>
+          <label class="filter">
+            <span>Plataforma</span>
+            <select id="platform-filter">
+              <option value="">Todas</option>
             </select>
-          </fieldset>
+          </label>
         </div>
-
-        <button type="submit" id="submit-btn">Adicionar a fila</button>
-        <p class="hint">
-          Saida vai para <code>{{ output_dir }}</code> (sincronizada com o PC via Syncthing).
-        </p>
-        <p id="form-error" class="error" hidden></p>
-      </form>
-    </section>
-
-    <section class="card">
-      <h2>Tarefas <span id="jobs-count" class="muted"></span></h2>
-      <ul id="jobs" class="jobs">
-        <li class="empty">Nenhuma tarefa ainda.</li>
-      </ul>
-    </section>
+        <ul id="library" class="library">
+          <li class="empty">Carregando...</li>
+        </ul>
+      </section>
+    </div>
   </main>
 
   <script src="/static/app.js"></script>

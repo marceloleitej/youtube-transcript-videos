@@ -128,12 +128,20 @@ Adicionar o container no CasaOS:
 
 ## Uso
 
+A UI tem duas abas no topo: **Download** e **Biblioteca**.
+
+### Aba Download
 1. Abre `https://marceloleitej-pi.tail92d61c.ts.net:8443` no celular
 2. Cola URL, escolhe mp4/mp3, marca transcrever (se quiser), escolhe idioma
 3. Clica em "Adicionar a fila"
 4. Acompanha progresso na lista — atualiza em tempo real
 5. Quando termina, Syncthing replica pro PC em segundos
 6. Abre o app PC: o video ja aparece no historico
+
+### Aba Biblioteca
+- Lista todo midia presente em `OUTPUT_DIR` (lendo os sidecars `*.json`).
+- Filtro por plataforma (YouTube / TikTok / Instagram / Facebook / Outro). Opcoes sao geradas dinamicamente conforme o que existe na pasta.
+- Click no item -> player HTML5 inline (`<video>` pra mp4, `<audio>` pra mp3). Streaming via rota `/media/<arquivo>` montada com `StaticFiles` (suporta HTTP Range nativo, entao seek funciona).
 
 ## API REST
 
@@ -145,6 +153,8 @@ Adicionar o container no CasaOS:
 | `/api/jobs/{id}` | GET | — | detalhes |
 | `/api/jobs/{id}/cancel` | POST | — | cancela job ativo |
 | `/api/jobs/{id}` | DELETE | — | remove job terminal |
+| `/api/library` | GET | — | lista videos em `OUTPUT_DIR` (title, platform, format, duration, `media_url`) |
+| `/media/<arquivo>` | GET | — | streaming do arquivo (StaticFiles, com Range) |
 
 Exemplo curl:
 
