@@ -590,6 +590,29 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .tr-ok { color: var(--ok); }
 .tr-no { color: var(--muted); }
 
+.library-delete {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  align-self: center;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.library-delete:hover:not(:disabled) {
+  background: rgba(255, 92, 108, 0.12);
+  border-color: var(--error);
+  color: var(--error);
+}
+.library-delete:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .pill {
   display: inline-block;
   padding: 2px 8px;

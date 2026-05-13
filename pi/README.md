@@ -104,10 +104,12 @@ Pelo Syncthing UI do Pi (http://marceloleitej-pi:8384):
 Pra acessar de fora pelo MagicDNS sem expor porta no roteador:
 
 ```bash
-sudo tailscale serve --bg --https=8443 http://localhost:8080
+# IMPORTANTE: NAO usar :8443 — Pi-hole reivindica essa porta no host.
+# Conflito leva o pi-hole a perder a rede no proximo restart do daemon.
+sudo tailscale serve --bg --https=8444 http://localhost:8080
 ```
 
-Acessar em: `https://marceloleitej-pi.tail92d61c.ts.net:8443`
+Acessar em: `https://marceloleitej-pi.tail92d61c.ts.net:8444`
 
 (Tailscale cuida do cert TLS via Let's Encrypt na tailnet — funciona
 em celular fora de casa desde que esteja conectado ao Tailscale.)
@@ -131,7 +133,7 @@ Adicionar o container no CasaOS:
 A UI tem duas abas no topo: **Download** e **Biblioteca**.
 
 ### Aba Download
-1. Abre `https://marceloleitej-pi.tail92d61c.ts.net:8443` no celular
+1. Abre `https://marceloleitej-pi.tail92d61c.ts.net:8444` no celular
 2. Cola URL, escolhe mp4/mp3, marca transcrever (se quiser), escolhe idioma
 3. Clica em "Adicionar a fila"
 4. Acompanha progresso na lista — atualiza em tempo real

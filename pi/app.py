@@ -139,6 +139,28 @@ def list_jobs():
     return {"jobs": job_manager.list()}
 
 
+@app.delete("/api/library/{filename}")
+def delete_library_item(filename: str):
+    """Delete a media file + its JSON sidecar + cached thumbnail.
+
+    Syncthing then propagates the removal to the PC. Filename is the basename
+    (e.g. ``my-video.mp4``); rejects any value containing path separators.
+    """
+    safe = os.path.basename(filename)
+    if not safe or safe != filename:
+        raise HTTPException(status_code=400, detail="invalid filename")
+    media_path = os.path.join(OUTPUT_DIR, safe)
+    if not os.path.isfile(media_path):
+        raise HTTPException(status_code=404, detail="media not found")
+    try:
+        VideoStore.delete_video(media_path)
+    except OSError as e:
+        log.exception("delete failed for %s", media_path)
+        raise HTTPException(status_code=500, detail=f"delete failed: {e}")
+    log.info("deleted library item: %s", safe)
+    return {"ok": True}
+
+
 @app.get("/api/library")
 def list_library():
     """List every video that lives in OUTPUT_DIR (the Syncthing-watched folder).

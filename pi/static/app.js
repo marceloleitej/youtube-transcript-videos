@@ -403,6 +403,7 @@ function libraryItemHtml(v, folder = "") {
   const thumbStyle = v.thumb_url
     ? `background-image: url('${escapeAttr(v.thumb_url)}');`
     : "";
+  const filename = (v.media_path || "").split(/[\\/]/).pop();
 
   const meta = [
     date ? `<span>${escapeHtml(date)}</span>` : "",
@@ -427,16 +428,53 @@ function libraryItemHtml(v, folder = "") {
         </div>
         <div class="library-meta">${meta}</div>
       </div>
+      <button type="button" class="library-delete"
+              data-delete="${escapeAttr(filename)}"
+              aria-label="Excluir" title="Excluir">&times;</button>
     </li>`;
 }
 
 function bindLibraryItems() {
   libraryEl.querySelectorAll("[data-play]").forEach((el) => {
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (ev) => {
+      if (ev.target.closest("[data-delete]")) return;
       const v = libraryVideos.find((x) => x.video_id === el.dataset.play);
       if (v) play(v);
     });
   });
+  libraryEl.querySelectorAll("[data-delete]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      deleteLibraryItem(el);
+    });
+  });
+}
+
+async function deleteLibraryItem(btn) {
+  const filename = btn.dataset.delete;
+  if (!filename) return;
+  const v = libraryVideos.find(
+    (x) => (x.media_path || "").split(/[\\/]/).pop() === filename,
+  );
+  const title = (v && v.title) || filename;
+  const ok = window.confirm(
+    `Excluir "${title}"?\n\nRemove o arquivo + sidecar JSON. O Syncthing propaga a remocao pro PC.`,
+  );
+  if (!ok) return;
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`/api/library/${encodeURIComponent(filename)}`, {
+      method: "DELETE",
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || `HTTP ${resp.status}`);
+    }
+    await refreshLibrary();
+  } catch (e) {
+    btn.disabled = false;
+    window.alert("Falha ao excluir: " + (e.message || e));
+  }
 }
 
 function bindFolderHeaders() {
