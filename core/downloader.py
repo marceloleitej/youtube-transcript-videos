@@ -45,7 +45,31 @@ class VideoDownloader:
         self._cancelled = True
 
     def _apply_common_opts(self, opts: dict) -> None:
-        """Add cookies, JS runtime config, and caller-supplied opts."""
+        """Add resilience defaults, cookies, JS runtime config, and caller opts."""
+        # Resilience defaults — TikTok throws HTTP 429 (Too Many Requests) on
+        # shortlink resolution (vt.tiktok.com/...) without backoff; Instagram
+        # and Facebook hit transient 5xx. Exponential backoff caps at 60s per
+        # retry. Any of these can be overridden via extra_opts.
+        opts.setdefault("extractor_retries", 5)
+        opts.setdefault("retries", 10)
+        opts.setdefault("fragment_retries", 10)
+        opts.setdefault("socket_timeout", 30)
+        opts.setdefault("sleep_interval_requests", 1)
+        opts.setdefault("retry_sleep_functions", {
+            "http": lambda n: min(60, 2 ** (n + 1)),
+            "fragment": lambda n: min(60, 2 ** (n + 1)),
+            "extractor": lambda n: min(60, 2 ** (n + 1)),
+        })
+        # yt-dlp's default UA can be flagged by TikTok's anti-bot. A current
+        # Chrome UA blends with normal browser traffic.
+        opts.setdefault("http_headers", {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+        })
+
         if self.cookies_file and os.path.isfile(self.cookies_file):
             opts["cookiefile"] = self.cookies_file
         js = _find_node()
