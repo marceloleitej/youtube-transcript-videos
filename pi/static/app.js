@@ -87,6 +87,9 @@ function renderJobs(jobs) {
   jobsEl.querySelectorAll("[data-remove]").forEach(el => {
     el.addEventListener("click", () => removeJob(el.dataset.remove));
   });
+  jobsEl.querySelectorAll("[data-retry]").forEach(el => {
+    el.addEventListener("click", () => retryJob(el.dataset.retry, el));
+  });
 }
 
 function jobHtml(j) {
@@ -102,7 +105,8 @@ function jobHtml(j) {
   ].filter(Boolean).join("");
 
   const actions = isTerminal
-    ? `<button class="danger" data-remove="${j.id}">Remover</button>`
+    ? `<button data-retry="${j.id}">Tentar de novo</button>
+       <button class="danger" data-remove="${j.id}">Remover</button>`
     : `<button data-cancel="${j.id}">Cancelar</button>`;
 
   return `
@@ -129,6 +133,22 @@ async function removeJob(id) {
   try {
     await fetch(`/api/jobs/${id}`, { method: "DELETE" });
   } finally {
+    refreshJobs();
+  }
+}
+
+async function retryJob(id, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const resp = await fetch(`/api/jobs/${id}/retry`, { method: "POST" });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || `HTTP ${resp.status}`);
+    }
+  } catch (e) {
+    showError("Retry falhou: " + (e.message || e));
+  } finally {
+    if (btn) btn.disabled = false;
     refreshJobs();
   }
 }

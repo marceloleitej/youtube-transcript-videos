@@ -201,6 +201,36 @@ def cancel_job(job_id: str):
     return {"ok": True}
 
 
+@app.post("/api/jobs/{job_id}/retry")
+def retry_job(job_id: str):
+    """Resubmit a terminal job (done/error/cancelled) with the same params.
+
+    The old job stays in the list for history; a brand-new job id is issued
+    so progress tracking and cancellation don't collide.
+    """
+    src = job_manager.get(job_id)
+    if not src:
+        raise HTTPException(status_code=404, detail="job not found")
+    if src["status"] not in ("done", "error", "cancelled"):
+        raise HTTPException(
+            status_code=400,
+            detail="job is not finished — cannot retry yet",
+        )
+    if src.get("transcribe") and not DEEPGRAM_API_KEY:
+        raise HTTPException(
+            status_code=400,
+            detail="DEEPGRAM_API_KEY nao configurada — transcricao indisponivel.",
+        )
+    new_job = job_manager.submit(
+        url=src["url"],
+        fmt=src["format"],
+        transcribe=bool(src.get("transcribe")),
+        language=src.get("language") or DEFAULT_LANGUAGE,
+    )
+    log.info("retry: %s -> %s (%s)", job_id, new_job.id, src["url"])
+    return JSONResponse(new_job.to_dict(), status_code=201)
+
+
 @app.delete("/api/jobs/{job_id}")
 def remove_job(job_id: str):
     ok = job_manager.remove(job_id)
