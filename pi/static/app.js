@@ -431,6 +431,11 @@ function libraryItemHtml(v, folder = "") {
     `<span class="${hasTr ? "tr-ok" : "tr-no"}">${hasTr ? "&#10003; Transcrito" : "&#9675; Sem transcricao"}</span>`,
   ].filter(Boolean).join('<span class="dot-sep">&middot;</span>');
 
+  const transcriptBtn = hasTr
+    ? `<button type="button" class="item-action"
+               data-transcript="${escapeAttr(filename)}">Transcricao</button>`
+    : "";
+
   const depth = folderDepth(folder);
   return `
     <li class="library-item"
@@ -447,6 +452,11 @@ function libraryItemHtml(v, folder = "") {
           <span class="fmt-pill ${fmt}">${(fmt || "").toUpperCase()}</span>
         </div>
         <div class="library-meta">${meta}</div>
+        <div class="library-actions">
+          <button type="button" class="item-action"
+                  data-download="${escapeAttr(filename)}">Baixar</button>
+          ${transcriptBtn}
+        </div>
       </div>
       <button type="button" class="library-delete"
               data-delete="${escapeAttr(filename)}"
@@ -457,7 +467,8 @@ function libraryItemHtml(v, folder = "") {
 function bindLibraryItems() {
   libraryEl.querySelectorAll("[data-play]").forEach((el) => {
     el.addEventListener("click", (ev) => {
-      if (ev.target.closest("[data-delete]")) return;
+      // Any action button inside the item handles its own click; don't play.
+      if (ev.target.closest("[data-delete],[data-download],[data-transcript]")) return;
       const v = libraryVideos.find((x) => x.video_id === el.dataset.play);
       if (v) play(v);
     });
@@ -468,6 +479,33 @@ function bindLibraryItems() {
       deleteLibraryItem(el);
     });
   });
+  libraryEl.querySelectorAll("[data-download]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      downloadToDevice(el.dataset.download);
+    });
+  });
+  libraryEl.querySelectorAll("[data-transcript]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openTranscript(el.dataset.transcript);
+    });
+  });
+}
+
+function downloadToDevice(filename) {
+  if (!filename) return;
+  // Navigate to an endpoint that sets Content-Disposition: attachment. The
+  // browser saves the file without leaving the page. More reliable on mobile
+  // Safari than <a download> on a streamed Range response.
+  const url = `/api/library/${encodeURIComponent(filename)}/download`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 async function deleteLibraryItem(btn) {
@@ -597,3 +635,93 @@ function formatDuration(seconds) {
 function escapeAttr(s) {
   return escapeHtml(s);
 }
+
+// ---------- Transcript modal -------------------------------------------
+
+const transcriptModal = document.getElementById("transcript-modal");
+const transcriptTitleEl = document.getElementById("transcript-title");
+const transcriptMetaEl = document.getElementById("transcript-meta");
+const transcriptBodyEl = document.getElementById("transcript-body");
+const transcriptCopyBtn = document.getElementById("transcript-copy");
+
+let currentTranscriptText = "";
+
+async function openTranscript(filename) {
+  if (!filename) return;
+  currentTranscriptText = "";
+  transcriptTitleEl.textContent = "Transcricao";
+  transcriptMetaEl.textContent = "";
+  transcriptBodyEl.textContent = "Carregando...";
+  transcriptCopyBtn.disabled = true;
+  transcriptCopyBtn.textContent = "Copiar transcricao";
+  showModal();
+
+  try {
+    const resp = await fetch(`/api/library/${encodeURIComponent(filename)}/transcription`);
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    currentTranscriptText = data.transcription || "";
+    transcriptTitleEl.textContent = data.title || "Transcricao";
+    const metaParts = [
+      data.language ? data.language : "",
+      formatDate(data.transcribed_at),
+    ].filter(Boolean);
+    transcriptMetaEl.textContent = metaParts.join(" · ");
+    transcriptBodyEl.textContent = currentTranscriptText || "(transcricao vazia)";
+    transcriptCopyBtn.disabled = !currentTranscriptText;
+  } catch (e) {
+    transcriptBodyEl.textContent = "Falha ao carregar: " + (e.message || e);
+  }
+}
+
+function showModal() {
+  transcriptModal.hidden = false;
+  transcriptModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+}
+
+function hideModal() {
+  transcriptModal.hidden = true;
+  transcriptModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+}
+
+transcriptModal.querySelectorAll("[data-close-modal]").forEach((el) => {
+  el.addEventListener("click", hideModal);
+});
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && !transcriptModal.hidden) hideModal();
+});
+
+transcriptCopyBtn.addEventListener("click", async () => {
+  if (!currentTranscriptText) return;
+  let ok = false;
+  try {
+    // Requires HTTPS (which Tailscale Serve provides) or localhost.
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(currentTranscriptText);
+      ok = true;
+    }
+  } catch {}
+  if (!ok) {
+    // Fallback: select the <pre> text and rely on the user-triggered copy
+    // path (still works in older mobile browsers / non-secure contexts).
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(transcriptBodyEl);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      ok = document.execCommand("copy");
+      sel.removeAllRanges();
+    } catch {}
+  }
+  transcriptCopyBtn.textContent = ok ? "Copiado!" : "Nao foi possivel copiar";
+  setTimeout(() => {
+    transcriptCopyBtn.textContent = "Copiar transcricao";
+  }, 2000);
+});

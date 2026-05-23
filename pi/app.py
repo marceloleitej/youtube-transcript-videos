@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
@@ -159,6 +159,53 @@ def delete_library_item(filename: str):
         raise HTTPException(status_code=500, detail=f"delete failed: {e}")
     log.info("deleted library item: %s", safe)
     return {"ok": True}
+
+
+def _resolve_library_file(filename: str) -> str:
+    """Validate a library filename param and return its absolute path.
+
+    Rejects anything that isn't a bare basename (no path separators) so the
+    caller can't escape OUTPUT_DIR. Raises HTTPException on invalid input or
+    missing file.
+    """
+    safe = os.path.basename(filename)
+    if not safe or safe != filename:
+        raise HTTPException(status_code=400, detail="invalid filename")
+    path = os.path.join(OUTPUT_DIR, safe)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="media not found")
+    return path
+
+
+@app.get("/api/library/{filename}/download")
+def download_library_item(filename: str):
+    """Stream a library file with Content-Disposition: attachment.
+
+    Used by the mobile UI to save the video locally when on 4G, instead of
+    streaming via the player. FileResponse honors Range requests, so the
+    browser's download manager can resume.
+    """
+    path = _resolve_library_file(filename)
+    return FileResponse(
+        path,
+        filename=os.path.basename(path),
+        media_type="application/octet-stream",
+    )
+
+
+@app.get("/api/library/{filename}/transcription")
+def get_library_transcription(filename: str):
+    """Return the transcription text stored in the JSON sidecar."""
+    path = _resolve_library_file(filename)
+    data = VideoStore.load(path)
+    if data is None or not data.transcription:
+        raise HTTPException(status_code=404, detail="transcription not available")
+    return {
+        "title": data.title,
+        "transcription": data.transcription,
+        "language": data.language,
+        "transcribed_at": data.transcribed_at,
+    }
 
 
 @app.get("/api/library")

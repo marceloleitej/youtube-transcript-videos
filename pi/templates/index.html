@@ -104,6 +104,21 @@
     </div>
   </main>
 
+  <div id="transcript-modal" class="modal" hidden aria-hidden="true" role="dialog" aria-labelledby="transcript-title">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="transcript-title">Transcricao</h3>
+        <button type="button" class="modal-close" data-close-modal aria-label="Fechar">&times;</button>
+      </div>
+      <div id="transcript-meta" class="modal-meta muted"></div>
+      <pre id="transcript-body" class="modal-body">Carregando...</pre>
+      <div class="modal-actions">
+        <button type="button" id="transcript-copy">Copiar transcricao</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/app.js?v={{ asset_version }}"></script>
 </body>
 </html>
